@@ -7,8 +7,10 @@ import { sendEmail } from "./mailer";
 import { fetchClaudeCodeDocs } from "./sources/claude-docs";
 import { fetchClaudeCodeGuide } from "./sources/github-guide";
 import { fetchSubstackRSS } from "./sources/substack";
+import { searchYouTube } from "./sources/youtube";
 import { appendReport } from "./save-report";
 import { commitAndPush } from "./git-push";
+import { filterAndMarkSeen } from "./dedup";
 
 async function main() {
   console.log("Claude Code の最新情報を取得中...\n");
@@ -137,10 +139,72 @@ async function main() {
     errors.push(`Substack (Mollick): ${msg}`);
   }
 
-  console.log(`\n合計 ${allItems.length} 件の情報を取得しました。`);
+  // YouTube（複数クエリで幅広く取得）
+  const youtubeQueries = ["Claude Code", "Anthropic Claude AI"];
+  for (const query of youtubeQueries) {
+    try {
+      process.stdout.write(`YouTube「${query}」を検索中... `);
+      const videos = await searchYouTube(query, 5);
+      console.log(`${videos.length} 件取得`);
+      for (const v of videos) {
+        allItems.push({
+          source: `YouTube (${v.channelName})`,
+          title: v.title,
+          url: v.url,
+          content: `チャンネル: ${v.channelName} / 再生回数: ${v.viewCount}\n${v.description}`,
+          publishedAt: v.publishedAt,
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.log(`失敗: ${msg}`);
+      errors.push(`YouTube(${query}): ${msg}`);
+    }
+  }
+
+  // 有識者 Substack（複数）
+  const substacks = [
+    { name: "Ethan Mollick (One Useful Thing)", url: "https://www.oneusefulthing.org" },
+    { name: "The Neuron", url: "https://www.theneurondaily.com" },
+    { name: "Ben's Bites", url: "https://www.bensbites.com" },
+  ];
+  for (const sub of substacks) {
+    try {
+      process.stdout.write(`${sub.name} を取得中... `);
+      const posts = await fetchSubstackRSS(sub.url, 5);
+      const relevant = posts.filter((p) => /claude|anthropic|ai/i.test(p.title + p.content));
+      console.log(`${relevant.length} 件取得`);
+      for (const p of relevant) {
+        allItems.push({
+          source: sub.name,
+          title: p.title,
+          url: p.url,
+          content: p.content,
+          publishedAt: p.publishedAt,
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.log(`失敗: ${msg}`);
+      errors.push(`${sub.name}: ${msg}`);
+    }
+  }
+
+  // 重複排除（過去に報告済みのURLを除外）
+  const rawCount = allItems.length;
+  const newItems = filterAndMarkSeen(allItems);
+  const skipped = rawCount - newItems.length;
+  if (skipped > 0) console.log(`\n重複除外: ${skipped} 件スキップ（過去報告済み）`);
+
+  console.log(`\n合計 ${newItems.length} 件の新着情報を取得しました。`);
+  if (newItems.length === 0) {
+    console.log("新着情報がありませんでした。処理を終了します。");
+    return;
+  }
+
   console.log("Claude API で日本語要約を生成中...\n");
 
-  const summary = await summarizeNews(allItems);
+  const summary = await summarizeNews(newItems);
 
   console.log("=".repeat(60));
   console.log("【Claude Code 最新情報まとめ】");
