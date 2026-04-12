@@ -79,36 +79,37 @@ async function main() {
   if (skipped > 0) console.log(`\n重複除外: ${skipped} 件スキップ（過去報告済み）`);
 
   console.log(`\n合計 ${newItems.length} 件の新着情報を取得しました。`);
-  if (newItems.length === 0) {
-    console.log("新着情報がありませんでした。処理を終了します。");
-    return;
+
+  // 新着がある場合のみ：要約・メール・レポート保存
+  if (newItems.length > 0) {
+    console.log("Claude API で日本語要約を生成中...\n");
+
+    const summary = await summarizeNews(newItems);
+
+    console.log("=".repeat(60));
+    console.log("【有識者 最新情報まとめ】");
+    console.log("=".repeat(60));
+    console.log(summary);
+
+    if (errors.length > 0) {
+      console.log("\n※ 以下のソースでエラーが発生しました:");
+      errors.forEach((e) => console.log(`  - ${e}`));
+    }
+
+    // MDファイルに追記
+    appendReport(summary);
+
+    // メール送信
+    const to = "c094588@gmail.com";
+    const date = new Date().toLocaleDateString("ja-JP");
+    process.stdout.write(`\nメールを ${to} へ送信中... `);
+    await sendEmail(to, `【AI最新情報】${date}`, summary);
+    console.log("送信完了！");
+  } else {
+    console.log("新着情報なし。X投稿のみ試みます。");
   }
 
-  console.log("Claude API で日本語要約を生成中...\n");
-
-  const summary = await summarizeNews(newItems);
-
-  console.log("=".repeat(60));
-  console.log("【有識者 最新情報まとめ】");
-  console.log("=".repeat(60));
-  console.log(summary);
-
-  if (errors.length > 0) {
-    console.log("\n※ 以下のソースでエラーが発生しました:");
-    errors.forEach((e) => console.log(`  - ${e}`));
-  }
-
-  // MDファイルに追記
-  appendReport(summary);
-
-  // メール送信
-  const to = "c094588@gmail.com";
-  const date = new Date().toLocaleDateString("ja-JP");
-  process.stdout.write(`\nメールを ${to} へ送信中... `);
-  await sendEmail(to, `【AI最新情報】${date}`, summary);
-  console.log("送信完了！");
-
-  // Xへ投稿（過去2日間のYouTube動画から海外の最有益1本を選んで投稿）
+  // X投稿は新着有無に関わらず実行（投稿済みURLは post-x.ts 内で管理）
   if (rawYoutubeItems.length > 0) {
     try {
       process.stdout.write("\nXへ投稿中... ");
