@@ -7,7 +7,7 @@ export interface YouTubeVideo {
   viewCount: string;
 }
 
-export async function searchYouTube(query: string, limit = 5): Promise<YouTubeVideo[]> {
+export async function searchYouTube(query: string, limit = 10, publishedAfter?: Date): Promise<YouTubeVideo[]> {
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) throw new Error("YOUTUBE_API_KEY が .env に設定されていません");
 
@@ -17,8 +17,11 @@ export async function searchYouTube(query: string, limit = 5): Promise<YouTubeVi
   searchUrl.searchParams.set("q", query);
   searchUrl.searchParams.set("type", "video");
   searchUrl.searchParams.set("maxResults", String(limit));
-  searchUrl.searchParams.set("order", "date");
+  searchUrl.searchParams.set("order", "viewCount");
   searchUrl.searchParams.set("relevanceLanguage", "en");
+  if (publishedAfter) {
+    searchUrl.searchParams.set("publishedAfter", publishedAfter.toISOString());
+  }
   searchUrl.searchParams.set("key", apiKey);
 
   const res = await fetch(searchUrl.toString());

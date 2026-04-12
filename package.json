@@ -23,7 +23,8 @@
     "@anthropic-ai/sdk": "^0.82.0",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.0",
-    "nodemailer": "^8.0.4"
+    "nodemailer": "^8.0.4",
+    "twitter-api-v2": "^1.29.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

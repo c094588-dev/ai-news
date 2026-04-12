@@ -1,159 +1,41 @@
 import "dotenv/config";
-import { fetchClaudeCodeReleases } from "./sources/github";
-import { searchHackerNews } from "./sources/hackernews";
-import { fetchAnthropicBlog } from "./sources/anthropic-blog";
 import { summarizeNews, NewsItem } from "./summarize";
 import { sendEmail } from "./mailer";
-import { fetchClaudeCodeDocs } from "./sources/claude-docs";
-import { fetchClaudeCodeGuide } from "./sources/github-guide";
 import { fetchSubstackRSS } from "./sources/substack";
 import { searchYouTube } from "./sources/youtube";
 import { appendReport } from "./save-report";
 import { commitAndPush } from "./git-push";
 import { filterAndMarkSeen } from "./dedup";
+import { postToX } from "./post-x";
 
 async function main() {
-  console.log("Claude Code の最新情報を取得中...\n");
+  console.log("有識者の最新情報を取得中...\n");
 
   const allItems: NewsItem[] = [];
+  const rawYoutubeItems: NewsItem[] = []; // dedup前の全YouTube動画（X投稿候補）
   const errors: string[] = [];
 
-  // GitHub リリース
-  try {
-    process.stdout.write("GitHub リリース情報を取得中... ");
-    const releases = await fetchClaudeCodeReleases(5);
-    console.log(`${releases.length} 件取得`);
-    for (const r of releases) {
-      allItems.push({
-        source: "GitHub (anthropics/claude-code releases)",
-        title: r.title,
-        url: r.url,
-        content: r.body,
-        publishedAt: r.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`GitHub: ${msg}`);
-  }
+  // 過去2日間の範囲を設定
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
 
-  // Hacker News
-  try {
-    process.stdout.write("Hacker News を検索中... ");
-    const stories = await searchHackerNews("Claude Code", 5);
-    console.log(`${stories.length} 件取得`);
-    for (const s of stories) {
-      allItems.push({
-        source: "Hacker News",
-        title: s.title,
-        url: s.url,
-        content: `スコア: ${s.score}, コメント: ${s.commentCount}`,
-        publishedAt: s.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`Hacker News: ${msg}`);
-  }
-
-  // Anthropic ブログ
-  try {
-    process.stdout.write("Anthropic ブログを取得中... ");
-    const posts = await fetchAnthropicBlog(5);
-    console.log(`${posts.length} 件取得`);
-    for (const p of posts) {
-      allItems.push({
-        source: "Anthropic 公式ブログ",
-        title: p.title,
-        url: p.url,
-        content: p.description,
-        publishedAt: p.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`Anthropic ブログ: ${msg}`);
-  }
-
-  // Claude Code 公式ドキュメント（リリースノート）
-  try {
-    process.stdout.write("Claude Code 公式ドキュメントを取得中... ");
-    const entries = await fetchClaudeCodeDocs(5);
-    console.log(`${entries.length} 件取得`);
-    for (const e of entries) {
-      allItems.push({
-        source: "Claude Code 公式ドキュメント（リリースノート）",
-        title: e.title,
-        url: e.url,
-        content: e.content,
-        publishedAt: e.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`Claude Docs: ${msg}`);
-  }
-
-  // GitHub claude-code-ultimate-guide
-  try {
-    process.stdout.write("Claude Code Ultimate Guide (GitHub) を取得中... ");
-    const commits = await fetchClaudeCodeGuide(5);
-    console.log(`${commits.length} 件取得`);
-    for (const c of commits) {
-      allItems.push({
-        source: "GitHub: claude-code-ultimate-guide",
-        title: c.title,
-        url: c.url,
-        content: c.content,
-        publishedAt: c.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`GitHub Guide: ${msg}`);
-  }
-
-  // Ethan Mollick (One Useful Thing - Substack)
-  try {
-    process.stdout.write("Ethan Mollick (One Useful Thing) を取得中... ");
-    const posts = await fetchSubstackRSS("https://www.oneusefulthing.org", 3);
-    const claudePosts = posts.filter((p) => /claude|anthropic|ai/i.test(p.title));
-    console.log(`${claudePosts.length} 件取得`);
-    for (const p of claudePosts) {
-      allItems.push({
-        source: "Ethan Mollick - One Useful Thing (Substack)",
-        title: p.title,
-        url: p.url,
-        content: p.content,
-        publishedAt: p.publishedAt,
-      });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.log(`失敗: ${msg}`);
-    errors.push(`Substack (Mollick): ${msg}`);
-  }
-
-  // YouTube（複数クエリで幅広く取得）
+  // YouTube（過去2日間・海外動画を幅広く取得）
   const youtubeQueries = ["Claude Code", "Anthropic Claude AI"];
   for (const query of youtubeQueries) {
     try {
       process.stdout.write(`YouTube「${query}」を検索中... `);
-      const videos = await searchYouTube(query, 5);
+      const videos = await searchYouTube(query, 10, twoDaysAgo);
       console.log(`${videos.length} 件取得`);
       for (const v of videos) {
-        allItems.push({
+        const item: NewsItem = {
           source: `YouTube (${v.channelName})`,
           title: v.title,
           url: v.url,
           content: `チャンネル: ${v.channelName} / 再生回数: ${v.viewCount}\n${v.description}`,
           publishedAt: v.publishedAt,
-        });
+        };
+        allItems.push(item);
+        rawYoutubeItems.push(item);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -162,7 +44,7 @@ async function main() {
     }
   }
 
-  // 有識者 Substack（複数）
+  // 有識者 Substack
   const substacks = [
     { name: "Ethan Mollick (One Useful Thing)", url: "https://www.oneusefulthing.org" },
     { name: "The Neuron", url: "https://www.theneurondaily.com" },
@@ -207,7 +89,7 @@ async function main() {
   const summary = await summarizeNews(newItems);
 
   console.log("=".repeat(60));
-  console.log("【Claude Code 最新情報まとめ】");
+  console.log("【有識者 最新情報まとめ】");
   console.log("=".repeat(60));
   console.log(summary);
 
@@ -223,8 +105,21 @@ async function main() {
   const to = "c094588@gmail.com";
   const date = new Date().toLocaleDateString("ja-JP");
   process.stdout.write(`\nメールを ${to} へ送信中... `);
-  await sendEmail(to, `【Claude Code 最新情報】${date}`, summary);
+  await sendEmail(to, `【AI最新情報】${date}`, summary);
   console.log("送信完了！");
+
+  // Xへ投稿（過去2日間のYouTube動画から海外の最有益1本を選んで投稿）
+  if (rawYoutubeItems.length > 0) {
+    try {
+      process.stdout.write("\nXへ投稿中... ");
+      await postToX(rawYoutubeItems);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.log(`失敗: ${msg}`);
+    }
+  } else {
+    console.log("\nYouTube動画がないためX投稿をスキップしました。");
+  }
 
   // GitHubへpush
   commitAndPush();
